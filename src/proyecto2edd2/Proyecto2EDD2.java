@@ -321,7 +321,7 @@ public class Proyecto2EDD2 {
             BigInteger claveCompartida = MotorSeguridad.acordarSecretoDiffieHellman();
             String textoPlano = MotorSeguridad.descifrarContenido3DES(textoCifrado, claveCompartida);
 
-            String contenidoComprimido = CompresorHuffman.comprimirTexto(textoPlano);
+            String contenidoComprimido = AlgoritmoHuffman.comprimirTexto(textoPlano);
             File archivoComprimido = new File(CARPETA_LOCAL_COMPRIMIDOS, libro.getCodigoIsbn() + "_huffman.txt");
 
             try (BufferedWriter escritor = new BufferedWriter(new FileWriter(archivoComprimido))) {
@@ -366,7 +366,7 @@ public class Proyecto2EDD2 {
 
         try {
             String datosComprimidos = leerTextoCompleto(archivos[idx - 1]);
-            String textoDescomprimido = CompresorHuffman.descomprimirTexto(datosComprimidos);
+            String textoDescomprimido = AlgoritmoHuffman.descomprimirTexto(datosComprimidos);
 
             System.out.println("\n================ LECTURA LOCAL (DESCOMPRIMIDO) ================");
             System.out.println(textoDescomprimido);
