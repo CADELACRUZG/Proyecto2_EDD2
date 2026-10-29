@@ -8,6 +8,10 @@ package proyecto2edd2;
  *
  * @author chris
  */
+
+/**
+ * Representa el nodo de un usuario registrado con su hash y categoría de cuenta.
+ */
 public class CuentaUsuario {
     private String nombreUsuario;
     private String resumenClave;

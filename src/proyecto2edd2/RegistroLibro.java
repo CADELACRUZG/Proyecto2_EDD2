@@ -8,6 +8,10 @@ package proyecto2edd2;
  *
  * @author chris
  */
+
+/**
+ * Representa los datos de un libro disponible en el catálogo del servidor.
+ */
 public class RegistroLibro {
     private String codigoIsbn;
     private String tituloObra;
