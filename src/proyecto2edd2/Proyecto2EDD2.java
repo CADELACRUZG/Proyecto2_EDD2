@@ -111,7 +111,7 @@ public class Proyecto2EDD2 {
      */
     private static void configurarParametrosInteractivos() {
         System.out.println("==========================================");
-        System.out.println("   CONFIGURACIÓN DE CONEXIÓN Y SEGURIDAD  ");
+        System.out.println("   CONFIGURACION DE CONEXION Y SEGURIDAD  ");
         System.out.println("==========================================");
         System.out.println("Configuración actual en config.txt:");
         System.out.println(" - IP Servidor: " + ipServidor);
