@@ -7,12 +7,11 @@ package proyecto2edd2;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.nio.file.Path;
 import java.util.Scanner;
 
 /**
@@ -25,114 +24,188 @@ import java.util.Scanner;
  */ 
 public class Proyecto2EDD2 {
     
-    private static String rutaServidor = "";
-    private static final String CARPETA_LOCAL_CIFRADOS = "local_cifrados";
-    private static final String CARPETA_LOCAL_COMPRIMIDOS = "local_comprimidos";
+    private static String ipServidor = "127.0.0.1";
+    private static String carpetaServidor = "C:\\ServidorLibros";
+    private static String direccionDescargas = "local_cifrados";
 
+    private static conexion conexion = null;
     private static TablaUsuarios usuariosRegistrados = new TablaUsuarios(53);
     private static VectorCatalogo catalogoLibros = new VectorCatalogo();
-    private static Scanner entrada = new Scanner(System.in);
+    private static Scanner teclado = new Scanner(System.in);
     
     public static void main(String[] args) {
-        prepararDirectoriosLocales();
-        if (!cargarConfiguracionConexion("config.txt")) {
-            System.out.println("No se pudo iniciar la aplicación por falta de archivo config.txt.");
-            return;
-        }
+        // 1. Cargar valores predeterminados desde config.txt (requerido por el enunciado)
+        cargarArchivoConfiguracion("config.txt");
 
-        if (!consumirCatalogosServidor()) {
-            System.out.println("No fue posible leer los archivos del servidor en: " + rutaServidor);
-            return;
-        }
+        // 2. Permitir ingreso por consola al estilo Laboratorio15 + valores criptográficos
+        configurarParametrosInteractivos();
 
-        ejecutarCicloAutenticacion();
+        try {
+            // false = Carpeta Compartida (SMB/local) | true = Socket puerto 5000
+            conexion = new conexion(ipServidor, carpetaServidor, direccionDescargas, false);
+            System.out.println("\nConexión exitosa con el servidor.");
+            System.out.println("Carpeta local de descargas (evidencia cifrada): " + conexion.getCarpetaDescargas());
+
+            if (!consumirCatalogosServidor()) {
+                System.out.println("No fue posible cargar usuarios.txt o catalogo.txt desde el servidor.");
+                return;
+            }
+
+            ejecutarCicloAutenticacion();
+
+        } catch (IOException e) {
+            System.out.println("No fue posible realizar la conexión: " + e.getMessage());
+        } finally {
+            if (conexion != null) {
+                conexion.cerrarConexion();
+            }
+            System.out.println("\nConexión finalizada.");
+        }
     }
     
-    private static void prepararDirectoriosLocales() {
-        new File(CARPETA_LOCAL_CIFRADOS).mkdirs();
-        new File(CARPETA_LOCAL_COMPRIMIDOS).mkdirs();
-    }
-
     /**
-     * Lee el archivo local de configuración para obtener la ruta de la carpeta compartida.
+     * Lee el archivo config.txt si existe al iniciar el programa.
      */
-    private static boolean cargarConfiguracionConexion(String rutaConfig) {
-        File archivo = new File(rutaConfig);
-        if (!archivo.exists()) return false;
+    private static void cargarArchivoConfiguracion(String rutaArchivo) {
+        File archivo = new File(rutaArchivo);
+        if (!archivo.exists()) return;
 
-        try (BufferedReader lector = new BufferedReader(new FileReader(archivo))) {
+        String p = null, g = null, a = null, b = null;
+        try (BufferedReader br = new BufferedReader(new FileReader(archivo))) {
             String linea;
-            while ((linea = lector.readLine()) != null) {
+            while ((linea = br.readLine()) != null) {
                 linea = linea.trim();
-                if (linea.startsWith("RUTA_SERVIDOR=")) {
-                    rutaServidor = linea.substring("RUTA_SERVIDOR=".length()).trim();
-                }
+                if (linea.startsWith("IP_SERVIDOR=")) ipServidor = linea.substring(12).trim();
+                else if (linea.startsWith("CARPETA_SERVIDOR=")) carpetaServidor = linea.substring(17).trim();
+                else if (linea.startsWith("CARPETA_LOCAL=")) direccionDescargas = linea.substring(14).trim();
+                else if (linea.startsWith("DH_P=")) p = linea.substring(5).trim();
+                else if (linea.startsWith("DH_G=")) g = linea.substring(5).trim();
+                else if (linea.startsWith("DH_A=")) a = linea.substring(5).trim();
+                else if (linea.startsWith("DH_B=")) b = linea.substring(5).trim();
             }
-            return !rutaServidor.isEmpty();
+            MotorSeguridad.configurarDiffieHellman(p, g, a, b);
         } catch (IOException ex) {
-            System.out.println("Error al leer configuración: " + ex.getMessage());
-            return false;
+            System.out.println("Aviso: No se pudo leer config.txt, se usarán valores por defecto.");
         }
     }
 
     /**
-     * Consume los archivos de usuarios y catálogo alojados en el servidor.
+     * Guarda la configuración actual en config.txt para dejar evidencia del archivo de configuración.
+     */
+    private static void guardarArchivoConfiguracion(String rutaArchivo) {
+        try (BufferedWriter bw = new BufferedWriter(new FileWriter(rutaArchivo))) {
+            bw.write("IP_SERVIDOR=" + ipServidor + "\n");
+            bw.write("CARPETA_SERVIDOR=" + carpetaServidor + "\n");
+            bw.write("CARPETA_LOCAL=" + direccionDescargas + "\n");
+            bw.write("DH_P=" + MotorSeguridad.getPrimoP().toString() + "\n");
+            bw.write("DH_G=" + MotorSeguridad.getGeneradorG().toString() + "\n");
+            bw.write("DH_A=" + MotorSeguridad.getSecretoServidorA().toString() + "\n");
+            bw.write("DH_B=" + MotorSeguridad.getSecretoClienteB().toString() + "\n");
+        } catch (IOException ex) {
+            System.out.println("Error al guardar config.txt: " + ex.getMessage());
+        }
+    }
+
+    /**
+     * Pide al usuario la IP, carpetas y parámetros criptográficos (como en Laboratorio15).
+     */
+    private static void configurarParametrosInteractivos() {
+        System.out.println("==========================================");
+        System.out.println("   CONFIGURACIÓN DE CONEXIÓN Y SEGURIDAD  ");
+        System.out.println("==========================================");
+        System.out.println("Configuración actual en config.txt:");
+        System.out.println(" - IP Servidor: " + ipServidor);
+        System.out.println(" - Carpeta Compartida Servidor: " + carpetaServidor);
+        System.out.println(" - Carpeta Local Descargas: " + direccionDescargas);
+        System.out.println(" - Diffie-Hellman (P=" + MotorSeguridad.getPrimoP()
+                + ", G=" + MotorSeguridad.getGeneradorG()
+                + ", A=" + MotorSeguridad.getSecretoServidorA()
+                + ", B=" + MotorSeguridad.getSecretoClienteB() + ")");
+
+        System.out.print("\n¿Desea ingresar manualmente la IP y los valores criptográficos? (S/N): ");
+        String resp = teclado.nextLine().trim().toUpperCase();
+
+        if (resp.equals("S")) {
+            System.out.print("Ingrese la dirección IP del servidor (ej. 192.168.1.45 o localhost): ");
+            String nuevaIp = teclado.nextLine().trim();
+            if (!nuevaIp.isEmpty()) ipServidor = nuevaIp;
+
+            System.out.print("Ingrese el nombre o ruta de la carpeta compartida (ej. ServidorLibros): ");
+            String nuevaCarpetaSrv = teclado.nextLine().trim();
+            if (!nuevaCarpetaSrv.isEmpty()) carpetaServidor = nuevaCarpetaSrv;
+
+            System.out.print("Ingrese la dirección de la carpeta local donde se almacenarán los archivos: ");
+            String nuevaDescarga = teclado.nextLine().trim();
+            if (!nuevaDescarga.isEmpty()) direccionDescargas = nuevaDescarga;
+
+            System.out.println("\n--- Parámetros Criptográficos Diffie-Hellman ---");
+            System.out.print("Ingrese el número primo (P) [Enter para mantener " + MotorSeguridad.getPrimoP() + "]: ");
+            String p = teclado.nextLine().trim();
+
+            System.out.print("Ingrese la raíz primitiva / generador (G) [Enter para mantener " + MotorSeguridad.getGeneradorG() + "]: ");
+            String g = teclado.nextLine().trim();
+
+            System.out.print("Ingrese el secreto del servidor (A) [Enter para mantener " + MotorSeguridad.getSecretoServidorA() + "]: ");
+            String a = teclado.nextLine().trim();
+
+            System.out.print("Ingrese el secreto del cliente (B) [Enter para mantener " + MotorSeguridad.getSecretoClienteB() + "]: ");
+            String b = teclado.nextLine().trim();
+
+            MotorSeguridad.configurarDiffieHellman(p, g, a, b);
+        }
+
+        guardarArchivoConfiguracion("config.txt");
+    }
+
+    /**
+     * Descarga y consume los catálogos de usuarios y libros desde el servidor.
      */
     private static boolean consumirCatalogosServidor() {
-        File archivoUsuarios = new File(rutaServidor, "usuarios.txt");
-        File archivoCatalogo = new File(rutaServidor, "catalogo.txt");
+        try {
+            Path archivoUsuarios = conexion.descargarArchivo("", "usuarios.txt");
+            Path archivoCatalogo = conexion.descargarArchivo("", "catalogo.txt");
 
-        if (!archivoUsuarios.exists() || !archivoCatalogo.exists()) {
-            return false;
-        }
+            usuariosRegistrados = new TablaUsuarios(53);
+            try (BufferedReader lectorUsr = new BufferedReader(new FileReader(archivoUsuarios.toFile()))) {
+                String linea;
+                while ((linea = lectorUsr.readLine()) != null) {
+                    linea = linea.trim();
+                    if (linea.isEmpty()) continue;
 
-        usuariosRegistrados = new TablaUsuarios(53);
-        try (BufferedReader lectorUsr = new BufferedReader(new FileReader(archivoUsuarios))) {
-            String linea;
-            while ((linea = lectorUsr.readLine()) != null) {
-                linea = linea.trim();
-                if (linea.isEmpty()) continue;
+                    int primerSep = linea.indexOf('|');
+                    int segundoSep = (primerSep != -1) ? linea.indexOf('|', primerSep + 1) : -1;
 
-                int primerSep = linea.indexOf('|');
-                int segundoSep = (primerSep != -1) ? linea.indexOf('|', primerSep + 1) : -1;
-
-                if (primerSep != -1 && segundoSep != -1) {
-                    String usr = linea.substring(0, primerSep).trim();
-                    String hash = linea.substring(primerSep + 1, segundoSep).trim();
-                    boolean prem = Boolean.parseBoolean(linea.substring(segundoSep + 1).trim());
-                    usuariosRegistrados.insertar(usr, hash, prem);
+                    if (primerSep != -1 && segundoSep != -1) {
+                        String usr = linea.substring(0, primerSep).trim();
+                        String hash = linea.substring(primerSep + 1, segundoSep).trim();
+                        boolean prem = Boolean.parseBoolean(linea.substring(segundoSep + 1).trim());
+                        usuariosRegistrados.insertar(usr, hash, prem);
+                    }
                 }
             }
-        } catch (IOException ex) {
-            System.out.println("Error al cargar usuarios del servidor: " + ex.getMessage());
-            return false;
-        }
 
-        catalogoLibros = new VectorCatalogo();
-        try (BufferedReader lectorCat = new BufferedReader(new FileReader(archivoCatalogo))) {
-            String linea;
-            while ((linea = lectorCat.readLine()) != null) {
-                linea = linea.trim();
-                if (linea.isEmpty()) continue;
+            catalogoLibros = new VectorCatalogo();
+            try (BufferedReader lectorCat = new BufferedReader(new FileReader(archivoCatalogo.toFile()))) {
+                String linea;
+                while ((linea = lectorCat.readLine()) != null) {
+                    linea = linea.trim();
+                    if (linea.isEmpty()) continue;
 
-                int sep = linea.indexOf('|');
-                if (sep != -1) {
-                    String isbn = linea.substring(0, sep).trim();
-                    String titulo = linea.substring(sep + 1).trim();
-                    catalogoLibros.agregar(new RegistroLibro(isbn, titulo));
+                    int sep = linea.indexOf('|');
+                    if (sep != -1) {
+                        String isbn = linea.substring(0, sep).trim();
+                        String titulo = linea.substring(sep + 1).trim();
+                        catalogoLibros.agregar(new RegistroLibro(isbn, titulo));
+                    }
                 }
             }
+            return true;
         } catch (IOException ex) {
-            System.out.println("Error al cargar catálogo del servidor: " + ex.getMessage());
+            System.out.println("Error al consumir catálogos del servidor: " + ex.getMessage());
             return false;
         }
-
-        return true;
     }
 
-    /**
-     * Pantalla de inicio de sesión.
-     */
     private static void ejecutarCicloAutenticacion() {
         boolean ejecutandoSistema = true;
         while (ejecutandoSistema) {
@@ -140,17 +213,16 @@ public class Proyecto2EDD2 {
             System.out.println("   PLATAFORMA DE LIBROS DIGITALES - LOGIN ");
             System.out.println("==========================================");
             System.out.print("Usuario (o escriba 'salir' para terminar): ");
-            String nombre = entrada.nextLine().trim();
+            String nombre = teclado.nextLine().trim();
 
             if (nombre.equalsIgnoreCase("salir")) {
                 break;
             }
 
             System.out.print("Contraseña: ");
-            String clavePlana = entrada.nextLine().trim();
+            String clavePlana = teclado.nextLine().trim();
             String hashCalculado = MotorSeguridad.generarHashClave(clavePlana);
 
-            // Refrescamos catálogos del servidor para soportar concurrencia en tiempo real
             consumirCatalogosServidor();
             CuentaUsuario cuenta = usuariosRegistrados.buscar(nombre);
 
@@ -162,12 +234,8 @@ public class Proyecto2EDD2 {
                 System.out.println("\n[!] Credenciales incorrectas. Intente nuevamente.");
             }
         }
-        System.out.println("Aplicación finalizada.");
     }
 
-    /**
-     * Menú principal tras iniciar sesión. Retorna false si el usuario elige Salir (Opción 4).
-     */
     private static boolean mostrarMenuPrincipal(CuentaUsuario usuarioActual) {
         boolean sesionActiva = true;
         while (sesionActiva) {
@@ -182,7 +250,7 @@ public class Proyecto2EDD2 {
             System.out.println("4. Salir");
             System.out.print("Seleccione una opción: ");
 
-            String opcion = entrada.nextLine().trim();
+            String opcion = teclado.nextLine().trim();
             switch (opcion) {
                 case "1":
                     explorarCatalogo(usuarioActual);
@@ -207,9 +275,6 @@ public class Proyecto2EDD2 {
         return true;
     }
 
-    /**
-     * Opción 1: Muestra el catálogo y gestiona la lectura en línea o descarga.
-     */
     private static void explorarCatalogo(CuentaUsuario usuario) {
         System.out.println("\n--- CATÁLOGO DE LIBROS DISPONIBLES ---");
         if (catalogoLibros.obtenerTamano() == 0) {
@@ -226,7 +291,7 @@ public class Proyecto2EDD2 {
 
         int seleccion;
         try {
-            seleccion = Integer.parseInt(entrada.nextLine().trim());
+            seleccion = Integer.parseInt(teclado.nextLine().trim());
         } catch (NumberFormatException e) {
             System.out.println("Entrada inválida.");
             return;
@@ -244,39 +309,15 @@ public class Proyecto2EDD2 {
             System.out.println("1. Leer en línea");
             System.out.println("2. Descargar libro (Compresión Huffman)");
             System.out.print("Elija una acción: ");
-            String subOpcion = entrada.nextLine().trim();
+            String subOpcion = teclado.nextLine().trim();
             if (subOpcion.equals("2")) {
                 descargarLibroPremium(libroElegido);
             } else {
                 leerLibroEnLinea(libroElegido);
             }
         } else {
-            // Usuario no premium inicia inmediatamente lectura en línea
             leerLibroEnLinea(libroElegido);
         }
-    }
-
-    /**
-     * Transfiere el archivo cifrado desde el servidor hacia la carpeta local del cliente
-     * a través de flujos de datos de la aplicación (conservando la evidencia local).
-     */
-    private static File transferirCopiaCifradaAlCliente(String isbn) throws IOException {
-        File carpetaLibrosServidor = new File(rutaServidor, "libros");
-        File origenServidor = new File(carpetaLibrosServidor, isbn + ".txt");
-        if (!origenServidor.exists()) {
-            throw new IOException("El archivo del libro no existe en el servidor: " + origenServidor.getPath());
-        }
-
-        File destinoLocalCifrado = new File(CARPETA_LOCAL_CIFRADOS, isbn + ".txt");
-        try (FileInputStream flujoEntrada = new FileInputStream(origenServidor);
-             FileOutputStream flujoSalida = new FileOutputStream(destinoLocalCifrado)) {
-            byte[] buffer = new byte[4096];
-            int bytesLeidos;
-            while ((bytesLeidos = flujoEntrada.read(buffer)) != -1) {
-                flujoSalida.write(buffer, 0, bytesLeidos);
-            }
-        }
-        return destinoLocalCifrado;
     }
 
     private static String leerTextoCompleto(File archivo) throws IOException {
@@ -291,15 +332,14 @@ public class Proyecto2EDD2 {
         return sb.toString();
     }
 
-    /**
-     * 1.1 Lectura en línea: Traslada copia cifrada, acuerda clave DH, descifra con 3DES y muestra en consola.
-     */
     private static void leerLibroEnLinea(RegistroLibro libro) {
         try {
-            File copiaLocalCifrada = transferirCopiaCifradaAlCliente(libro.getCodigoIsbn());
-            String textoCifrado = leerTextoCompleto(copiaLocalCifrada);
+            Path copiaLocalCifrada = conexion.descargarArchivo("libros", libro.getCodigoIsbn() + ".txt");
+            String textoCifrado = leerTextoCompleto(copiaLocalCifrada.toFile());
 
             BigInteger claveCompartida = MotorSeguridad.acordarSecretoDiffieHellman();
+            System.out.println("[Diffie-Hellman] Clave secreta compartida obtenida: " + claveCompartida);
+
             String textoPlano = MotorSeguridad.descifrarContenido3DES(textoCifrado, claveCompartida);
 
             System.out.println("\n================ LECTURA EN LÍNEA: " + libro.getTituloObra() + " ================");
@@ -310,41 +350,38 @@ public class Proyecto2EDD2 {
         }
     }
 
-    /**
-     * 1.2 Descarga de libros: Traslada copia cifrada, descifra con DH + 3DES, comprime con Huffman y guarda copia local.
-     */
     private static void descargarLibroPremium(RegistroLibro libro) {
         try {
-            File copiaLocalCifrada = transferirCopiaCifradaAlCliente(libro.getCodigoIsbn());
-            String textoCifrado = leerTextoCompleto(copiaLocalCifrada);
+            Path copiaLocalCifrada = conexion.descargarArchivo("libros", libro.getCodigoIsbn() + ".txt");
+            String textoCifrado = leerTextoCompleto(copiaLocalCifrada.toFile());
 
             BigInteger claveCompartida = MotorSeguridad.acordarSecretoDiffieHellman();
+            System.out.println("[Diffie-Hellman] Clave secreta compartida obtenida: " + claveCompartida);
+
             String textoPlano = MotorSeguridad.descifrarContenido3DES(textoCifrado, claveCompartida);
-
             String contenidoComprimido = AlgoritmoHuffman.comprimirTexto(textoPlano);
-            File archivoComprimido = new File(CARPETA_LOCAL_COMPRIMIDOS, libro.getCodigoIsbn() + "_huffman.txt");
 
-            try (BufferedWriter escritor = new BufferedWriter(new FileWriter(archivoComprimido))) {
+            Path archivoComprimido = conexion.getCarpetaComprimidos()
+                    .resolve(libro.getCodigoIsbn() + "_huffman.txt");
+
+            try (BufferedWriter escritor = new BufferedWriter(new FileWriter(archivoComprimido.toFile()))) {
                 escritor.write(contenidoComprimido);
             }
 
-            System.out.println("\n[+] Descarga exitosa.");
-            System.out.println(" -> Copia cifrada (evidencia): " + copiaLocalCifrada.getAbsolutePath());
-            System.out.println(" -> Copia comprimida (Huffman): " + archivoComprimido.getAbsolutePath());
+            System.out.println("\n[+] Descarga y compresión Huffman completadas.");
+            System.out.println(" -> Copia cifrada (evidencia): " + copiaLocalCifrada);
+            System.out.println(" -> Copia comprimida (Huffman): " + archivoComprimido);
         } catch (IOException ex) {
             System.out.println("Error al descargar el libro: " + ex.getMessage());
         }
     }
 
-    /**
-     * Opción 2: Lectura Local (descomprime un libro previamente descargado con Huffman).
-     */
     private static void realizarLecturaLocal() {
-        File carpeta = new File(CARPETA_LOCAL_COMPRIMIDOS);
+        File carpeta = conexion.getCarpetaComprimidos().toFile();
         File[] archivos = carpeta.listFiles();
 
         if (archivos == null || archivos.length == 0) {
-            System.out.println("\nNo tienes libros descargados localmente.");
+            System.out.println("\nNo tienes libros comprimidos descargados localmente.");
             return;
         }
 
@@ -357,7 +394,7 @@ public class Proyecto2EDD2 {
 
         int idx;
         try {
-            idx = Integer.parseInt(entrada.nextLine().trim());
+            idx = Integer.parseInt(teclado.nextLine().trim());
         } catch (NumberFormatException e) {
             return;
         }

@@ -20,14 +20,26 @@ import javax.crypto.spec.SecretKeySpec;
  * Gestiona el cálculo de hashes, intercambio Diffie-Hellman y cifrado 3DES
  */
 public class MotorSeguridad {
-    // Valores predeterminados para Diffie-Hellman (ajustables según los datos del servidor)
-    private static final BigInteger PRIMO_P = new BigInteger("23");
-    private static final BigInteger GENERADOR_G = new BigInteger("5");
-    private static final BigInteger SECRETO_SERVIDOR_A = new BigInteger("6");
-    private static final BigInteger SECRETO_CLIENTE_B = new BigInteger("15");
+    // Valores de Diffie-Hellman (configurables por el usuario o por archivo config.txt)
+    private static BigInteger primoP = new BigInteger("23");
+    private static BigInteger generadorG = new BigInteger("5");
+    private static BigInteger secretoServidorA = new BigInteger("6");
+    private static BigInteger secretoClienteB = new BigInteger("15");
+
+    public static void configurarDiffieHellman(String p, String g, String a, String b) {
+        if (p != null && !p.isEmpty()) primoP = new BigInteger(p.trim());
+        if (g != null && !g.isEmpty()) generadorG = new BigInteger(g.trim());
+        if (a != null && !a.isEmpty()) secretoServidorA = new BigInteger(a.trim());
+        if (b != null && !b.isEmpty()) secretoClienteB = new BigInteger(b.trim());
+    }
+
+    public static BigInteger getPrimoP() { return primoP; }
+    public static BigInteger getGeneradorG() { return generadorG; }
+    public static BigInteger getSecretoServidorA() { return secretoServidorA; }
+    public static BigInteger getSecretoClienteB() { return secretoClienteB; }
 
     /**
-     * Aplica SHA-256 a la contraseña ingresada y devuelve su representación hexadecimal.
+     * Aplica SHA-256 a la contraseña ingresada durante el inicio de sesión.
      */
     public static String generarHashClave(String textoPlano) {
         try {
@@ -48,27 +60,21 @@ public class MotorSeguridad {
     }
 
     /**
-     * Ejecuta el intercambio de claves Diffie-Hellman y retorna el secreto compartido.
+     * Ejecuta el intercambio de claves Diffie-Hellman con los valores configurados.
      */
     public static BigInteger acordarSecretoDiffieHellman() {
-        // Llave pública del servidor: A = g^a mod p
-        BigInteger publicaServidor = GENERADOR_G.modPow(SECRETO_SERVIDOR_A, PRIMO_P);
-        // Llave pública del cliente: B = g^b mod p
-        BigInteger publicaCliente = GENERADOR_G.modPow(SECRETO_CLIENTE_B, PRIMO_P);
+        BigInteger publicaServidor = generadorG.modPow(secretoServidorA, primoP);
+        BigInteger publicaCliente = generadorG.modPow(secretoClienteB, primoP);
 
-        // El cliente calcula la llave compartida: S = A^b mod p
-        BigInteger secretoCliente = publicaServidor.modPow(SECRETO_CLIENTE_B, PRIMO_P);
-        // El servidor calcula la llave compartida: S = B^a mod p
-        BigInteger secretoServidor = publicaCliente.modPow(SECRETO_SERVIDOR_A, PRIMO_P);
+        BigInteger secretoCliente = publicaServidor.modPow(secretoClienteB, primoP);
+        BigInteger secretoServidor = publicaCliente.modPow(secretoServidorA, primoP);
 
         if (!secretoCliente.equals(secretoServidor)) {
-            throw new IllegalStateException("Fallo en la sincronización Diffie-Hellman");
+            throw new IllegalStateException("Fallo en el acuerdo de clave Diffie-Hellman");
         }
         return secretoCliente;
     }
-    /**
-     * Ajusta la clave obtenida de Diffie-Hellman a un arreglo exacto de 24 bytes para 3DES.
-     */
+
     private static SecretKeySpec construirLlave3DES(BigInteger secretoCompartido) throws Exception {
         byte[] semilla = secretoCompartido.toString().getBytes(StandardCharsets.UTF_8);
         MessageDigest sha = MessageDigest.getInstance("SHA-256");
@@ -81,7 +87,7 @@ public class MotorSeguridad {
     }
 
     /**
-     * Descifra un texto en Base64 utilizando el algoritmo 3DES (DESede).
+     * Descifra el contenido del libro utilizando 3DES y la clave secreta compartida.
      */
     public static String descifrarContenido3DES(String contenidoCifradoBase64, BigInteger secretoDH) {
         try {
@@ -92,22 +98,7 @@ public class MotorSeguridad {
             byte[] bytesDescifrados = descifrador.doFinal(bytesDecodificados);
             return new String(bytesDescifrados, StandardCharsets.UTF_8);
         } catch (Exception ex) {
-            return "[Error al descifrar con 3DES: Verifique formato Base64 o parámetros de clave] Detalle: " + ex.getMessage();
-        }
-    }
-
-    /**
-     * Método auxiliar para cifrar libros de prueba cuando prepares tu carpeta del servidor.
-     */
-    public static String cifrarContenido3DES(String textoOriginal, BigInteger secretoDH) {
-        try {
-            SecretKeySpec llaveSimetrica = construirLlave3DES(secretoDH);
-            Cipher cifrador = Cipher.getInstance("DESede/ECB/PKCS5Padding");
-            cifrador.init(Cipher.ENCRYPT_MODE, llaveSimetrica);
-            byte[] cifrado = cifrador.doFinal(textoOriginal.getBytes(StandardCharsets.UTF_8));
-            return Base64.getEncoder().encodeToString(cifrado);
-        } catch (Exception ex) {
-            throw new RuntimeException("Error al cifrar texto de prueba", ex);
+            return "[Error al descifrar con 3DES: Verifique los parámetros Diffie-Hellman o el archivo] " + ex.getMessage();
         }
     }
 }
