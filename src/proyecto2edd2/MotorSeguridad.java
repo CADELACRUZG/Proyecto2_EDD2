@@ -18,7 +18,7 @@ import java.security.MessageDigest;
  * y el cifrado/descifrado 3-DES basado en S-DES con 3 llaves de 10 bits.
  */
 public class MotorSeguridad {
-    // Cambia aquí entre "SHA-256" o "MD5" según el archivo de usuarios utilizado
+    // Aquí se cambia entre "SHA-256" o "MD5" según el archivo de usuarios utilizado
     private static final String ALGORITMO_HASH = "SHA-256";
 
     // Parámetros predeterminados de Diffie-Hellman para Llave 1 (K1 = 57 -> 0000111001)
