@@ -10,7 +10,6 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,9 +34,10 @@ public class Proyecto2EDD2 {
     private static conexion conexion = null;
     private static TablaUsuarios usuariosRegistrados = new TablaUsuarios(53);
     private static VectorCatalogo catalogoLibros = new VectorCatalogo();
-    private static Scanner teclado = new Scanner(System.in);
+    private static Scanner teclado = new Scanner(System.in, StandardCharsets.UTF_8);
     
     public static void main(String[] args) {
+        System.setOut(new java.io.PrintStream(System.out, true, java.nio.charset.StandardCharsets.UTF_8));
         cargarArchivoConfiguracion("config.txt");
         solicitarConfiguracionInicial();
 
@@ -67,32 +67,22 @@ public class Proyecto2EDD2 {
         File archivo = new File(ruta);
         if (!archivo.exists()) return;
 
-        String p = null, g = null, a = null, b = null;
-        try (BufferedReader br = new BufferedReader(new FileReader(archivo))) {
+        try (BufferedReader br = new BufferedReader(new FileReader(archivo, StandardCharsets.UTF_8))) {
             String linea;
             while ((linea = br.readLine()) != null) {
                 linea = linea.trim();
                 if (linea.startsWith("IP_SERVIDOR=")) ipServidor = linea.substring(12).trim();
                 else if (linea.startsWith("CARPETA_LOCAL=")) direccionDescargas = linea.substring(14).trim();
-                else if (linea.startsWith("DH_P=")) p = linea.substring(5).trim();
-                else if (linea.startsWith("DH_G=")) g = linea.substring(5).trim();
-                else if (linea.startsWith("DH_A=")) a = linea.substring(5).trim();
-                else if (linea.startsWith("DH_B=")) b = linea.substring(5).trim();
             }
-            MotorSeguridad.configurarDiffieHellman(p, g, a, b);
         } catch (IOException ex) {
             System.out.println("Usando configuración inicial por defecto.");
         }
     }
 
     private static void guardarArchivoConfiguracion(String ruta) {
-        try (BufferedWriter bw = new BufferedWriter(new FileWriter(ruta))) {
+        try (BufferedWriter bw = new BufferedWriter(new FileWriter(ruta, StandardCharsets.UTF_8))) {
             bw.write("IP_SERVIDOR=" + ipServidor + "\n");
             bw.write("CARPETA_LOCAL=" + direccionDescargas + "\n");
-            bw.write("DH_P=" + MotorSeguridad.getPrimoP() + "\n");
-            bw.write("DH_G=" + MotorSeguridad.getGeneradorG() + "\n");
-            bw.write("DH_A=" + MotorSeguridad.getSecretoServidorA() + "\n");
-            bw.write("DH_B=" + MotorSeguridad.getSecretoClienteB() + "\n");
         } catch (IOException ex) {
             System.out.println("No se pudo guardar config.txt: " + ex.getMessage());
         }
@@ -110,26 +100,26 @@ public class Proyecto2EDD2 {
         String dirInput = teclado.nextLine().trim();
         if (!dirInput.isEmpty()) direccionDescargas = dirInput;
 
-        System.out.print("¿Desea modificar los valores predeterminados de Diffie-Hellman? (S/N): ");
+        System.out.print("¿Desea modificar los parámetros predeterminados de Diffie-Hellman? (S/N): ");
         String modDh = teclado.nextLine().trim().toUpperCase();
         if (modDh.equals("S")) {
-            System.out.print("Primo P [actual " + MotorSeguridad.getPrimoP() + "]: ");
-            String p = teclado.nextLine().trim();
-            System.out.print("Generador G [actual " + MotorSeguridad.getGeneradorG() + "]: ");
-            String g = teclado.nextLine().trim();
-            System.out.print("Secreto Servidor A [actual " + MotorSeguridad.getSecretoServidorA() + "]: ");
-            String a = teclado.nextLine().trim();
-            System.out.print("Secreto Cliente B [actual " + MotorSeguridad.getSecretoClienteB() + "]: ");
-            String b = teclado.nextLine().trim();
-            MotorSeguridad.configurarDiffieHellman(p, g, a, b);
+            for (int i = 1; i <= 3; i++) {
+                System.out.println("\n--- Parámetros para Llave " + i + " ---");
+                System.out.print("Primo p" + i + ": ");
+                String p = teclado.nextLine().trim();
+                System.out.print("Generador g" + i + ": ");
+                String g = teclado.nextLine().trim();
+                System.out.print("Secreto a" + i + ": ");
+                String a = teclado.nextLine().trim();
+                System.out.print("Secreto b" + i + ": ");
+                String b = teclado.nextLine().trim();
+                MotorSeguridad.configurarLlaveDH(i, p, g, a, b);
+            }
         }
 
         guardarArchivoConfiguracion("config.txt");
     }
 
-    /**
-     * Descarga directamente el archivo configurado en ARCHIVO_USUARIOS y ARCHIVO_CATALOGO.
-     */
     private static boolean consumirCatalogosServidor() {
         try {
             Path rutaUsuariosLocal = conexion.descargarArchivo("Usuarios", ARCHIVO_USUARIOS);
@@ -285,14 +275,24 @@ public class Proyecto2EDD2 {
         }
     }
 
+    private static void mostrarLlavesDiffieHellman() {
+        int k1 = MotorSeguridad.obtenerLlave1();
+        int k2 = MotorSeguridad.obtenerLlave2();
+        int k3 = MotorSeguridad.obtenerLlave3();
+        System.out.println("\n[Diffie-Hellman] Llaves de 10 bits generadas:");
+        System.out.println(" -> Llave 1: " + MotorSeguridad.formatearBinario10Bits(k1) + " (" + k1 + ")");
+        System.out.println(" -> Llave 2: " + MotorSeguridad.formatearBinario10Bits(k2) + " (" + k2 + ")");
+        System.out.println(" -> Llave 3: " + MotorSeguridad.formatearBinario10Bits(k3) + " (" + k3 + ")");
+    }
+
     private static void leerLibroEnLinea(RegistroLibro libro) {
         try {
             Path copiaLocalCifrada = conexion.descargarArchivo("Libros", libro.getCodigoIsbn() + ".bin");
             if (copiaLocalCifrada == null) return;
 
             byte[] bytesCifrados = Files.readAllBytes(copiaLocalCifrada);
-            BigInteger claveCompartida = MotorSeguridad.acordarSecretoDiffieHellman();
-            String textoPlano = MotorSeguridad.descifrarBytes3DES(bytesCifrados, claveCompartida);
+            mostrarLlavesDiffieHellman();
+            String textoPlano = MotorSeguridad.descifrarBytes3DES(bytesCifrados);
 
             System.out.println("\n================ LECTURA EN LÍNEA: " + libro.getTituloObra() + " ================");
             System.out.println(textoPlano);
@@ -308,8 +308,8 @@ public class Proyecto2EDD2 {
             if (copiaLocalCifrada == null) return;
 
             byte[] bytesCifrados = Files.readAllBytes(copiaLocalCifrada);
-            BigInteger claveCompartida = MotorSeguridad.acordarSecretoDiffieHellman();
-            String textoPlano = MotorSeguridad.descifrarBytes3DES(bytesCifrados, claveCompartida);
+            mostrarLlavesDiffieHellman();
+            String textoPlano = MotorSeguridad.descifrarBytes3DES(bytesCifrados);
 
             String contenidoComprimido = AlgoritmoHuffman.comprimirTexto(textoPlano);
             Path archivoComprimido = conexion.getCarpetaComprimidos()

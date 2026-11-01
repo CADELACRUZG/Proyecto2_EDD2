@@ -1,6 +1,2 @@
 IP_SERVIDOR=192.168.1.14
 CARPETA_LOCAL=C:\Users\chris\OneDrive\Attachments
-DH_P=17
-DH_G=5
-DH_A=7
-DH_B=1
